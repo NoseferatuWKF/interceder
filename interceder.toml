@@ -1,0 +1,26 @@
+[server]
+address = "0.0.0.0"
+port = "42069"
+env = [
+    "AWSSecret",
+    "OrgId",
+    "AuthSignature"
+]
+
+[webhook]
+url = "https://local.unleashedsoftware.com/api/api/webhooks/incoming/shopify"
+params = ["OrgId"]
+topics = [
+    "orders/updated",
+    "fulfillments/create",
+    "fulfillments/update",
+    "customers/update"
+]
+headers = [
+    ["api-auth-id", "OrgId"],
+    ["api-auth-signature", "AuthSignature"],
+    ["x-shopify-shop-domain", "req"],
+    ["x-shopify-topic", "req"]
+]
+hash = { is_required = true, header = "x-shopify-hmac-sha256" }
+rehash = { is_required = true, secret = "AWSSecret" }
