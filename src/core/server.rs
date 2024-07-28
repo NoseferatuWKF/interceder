@@ -6,6 +6,8 @@ use tide::{Request, Result, Response, StatusCode};
 use crate::core::config::Config;
 
 const PAYLOAD_PATH: &str = "./payload";
+// NOTE: this could be expanded to enums
+const REQUEST_HEADERS: &str = "req";
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 static WEBHOOK: OnceLock<String> = OnceLock::new();
@@ -17,10 +19,7 @@ pub async fn run(config: Config) -> Result<()> {
 
     let server = String::from(&config.server.address) + ":" + &config.server.port;
 
-    // transfer config ownership to init
-    if let Err(e) = init(config) {
-        panic!("{e}");
-    }
+    init(config)?;
 
     let mut app = tide::new();
 
@@ -57,7 +56,7 @@ fn init(config: Config) -> Result<()> {
         let url = config.webhook.params.iter()
             .fold(
                 String::from(&config.webhook.url),
-                // env should already exists here after init
+                // env should already exists here
                 |acc, i| acc + "/" + &std::env::var(i).unwrap());
         WEBHOOK.set(url).unwrap();
     }
@@ -84,7 +83,7 @@ async fn redirect(mut req: Request<()>) -> Result {
             &body)?;
     }
 
-    send_request(headers, body).await;
+    send_request(headers, body).await?;
 
     Ok(Response::new(StatusCode::Ok))
 }
@@ -107,19 +106,19 @@ async fn replay(req: Request<()>) -> Result {
         input.read_to_end(&mut buffer)?;
     }
 
-    send_request(headers, buffer).await;
+    send_request(headers, buffer).await?;
 
     Ok(Response::new(StatusCode::Ok))
 }
 
-async fn send_request(headers: Vec<String>, body_buffer: Vec<u8>) {
+async fn send_request(headers: Vec<String>, body_buffer: Vec<u8>) -> Result<()> {
     // take headers ownership to mutate the elements
     let mut iter = headers.into_iter();
 
     // all the unwraps here should be fine as it was asserted in init
     let mut rebuilt_headers = CONFIG.get().unwrap().webhook.headers.iter()
         // check if header needs value from env or not
-        .map(|v| match v.get(1).is_some_and(|x| x.eq("req")) {
+        .map(|v| match v.get(1).is_some_and(|x| x.eq(REQUEST_HEADERS)) {
             true => {
                 let header = v.get(0).unwrap();
                 // removes the first index in the headers
@@ -164,26 +163,23 @@ async fn send_request(headers: Vec<String>, body_buffer: Vec<u8>) {
     builder = builder.body(body_buffer);
 
     // send request
-    if let Err(e) = builder.send().await {
-        panic!("{e}");
-    }
+    builder.send().await?;
+
+    Ok(())
 }
 
 fn get_required_headers_values(req: &Request<()>) -> Vec<String> {
     // get base headers value
     let mut headers = CONFIG.get().unwrap().webhook.headers.iter()
-        .filter_map(|v| match v.get(1).is_some_and(|x| x.eq("req")) {
-            true => v.get(0),
+        .filter_map(|v| match v.get(1).is_some_and(|x| x.eq(REQUEST_HEADERS)) {
+            true => Some(req.header(v.get(0).unwrap().as_str())
+                .expect(format!("missing header: {}", v.get(0).unwrap()).as_str())
+                .get(0)
+                .unwrap()
+                .to_string()),
             false => None,
         })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .map(|v| req.header(v.as_str())
-            .expect(format!("missing header: {}", v).as_str())
-            .get(0)
-            .unwrap()
-            .to_string())
-        .collect::<Vec<String>>();
+        .collect::<Vec<_>>();
 
     // optional: add hash value to required headers
     let hash = &CONFIG.get().unwrap().webhook.hash;
