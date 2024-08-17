@@ -3,23 +3,23 @@ use std::io::prelude::*;
 use std::sync::OnceLock;
 use tide::{Request, Result, Response, StatusCode};
 
-use crate::core::config::Config;
+use crate::core::config::Manifest;
 
 const PAYLOAD_PATH: &str = "./payload";
 // NOTE: this could be expanded to enums
 const REQUEST_HEADERS: &str = "req";
 
-static CONFIG: OnceLock<Config> = OnceLock::new();
+static MANIFEST: OnceLock<Manifest> = OnceLock::new();
 static WEBHOOK: OnceLock<String> = OnceLock::new();
 
 #[tokio::main]
-pub async fn run(config: Config) -> Result<()> {
+pub async fn run(manifest: Manifest) -> Result<()> {
     use tide::security::{CorsMiddleware, Origin};
     use http_types::headers::HeaderValue;
 
-    let server = String::from(&config.server.address) + ":" + &config.server.port;
+    let server = String::from(&manifest.server.address) + ":" + &manifest.server.port;
 
-    init(config)?;
+    init(manifest)?;
 
     let mut app = tide::new();
 
@@ -30,7 +30,7 @@ pub async fn run(config: Config) -> Result<()> {
     app.with(cors);
 
     // setup endpoints
-    app.at("/redirect").post(redirect);
+    app.at("/intercede").post(intercede);
     app.at("/replay").get(replay);
 
     println!("Interceder is listening on {}", server);
@@ -39,23 +39,23 @@ pub async fn run(config: Config) -> Result<()> {
     Ok(())
 }
 
-fn init(config: Config) -> Result<()> {
+fn init(manifest: Manifest) -> Result<()> {
     fs::create_dir_all(PAYLOAD_PATH)?;
 
-    // set global variable and drop config
-    if let Ok(_) = CONFIG.set(config) {
-        let config = CONFIG.get().unwrap();
+    // set global variable and drop manifest
+    if let Ok(_) = MANIFEST.set(manifest) {
+        let manifest = MANIFEST.get().unwrap();
         
         // assert: env must exist or die
-        config.server.env.iter().for_each(|v| {
+        manifest.server.env.iter().for_each(|v| {
             if let Err(e) = std::env::var(&v) {
                 panic!("{}: {}", e, v);
             }
         });
 
-        let url = config.webhook.params.iter()
+        let url = manifest.webhook.params.iter()
             .fold(
-                String::from(&config.webhook.url),
+                String::from(&manifest.webhook.url),
                 // env should already exists here
                 |acc, i| acc + "/" + &std::env::var(i).unwrap());
         WEBHOOK.set(url).unwrap();
@@ -64,13 +64,13 @@ fn init(config: Config) -> Result<()> {
     Ok(())
 }
 
-async fn redirect(mut req: Request<()>) -> Result {
+async fn intercede(mut req: Request<()>) -> Result {
     let body = req.body_bytes().await?;
 
     let headers = get_required_headers_values(&req);
 
-    // find matching topic from config
-    let topic = CONFIG.get().unwrap().webhook.topics.iter()
+    // find matching topic from manifest
+    let topic = MANIFEST.get().unwrap().webhook.topics.iter()
         .find(|x| headers.iter().find(|y| y.eq(x)).is_some());
 
     // cache request body
@@ -91,8 +91,8 @@ async fn redirect(mut req: Request<()>) -> Result {
 async fn replay(req: Request<()>) -> Result { 
     let headers = get_required_headers_values(&req);
 
-    // find matching topic from config
-    let topic = CONFIG.get().unwrap().webhook.topics.iter()
+    // find matching topic from manifest
+    let topic = MANIFEST.get().unwrap().webhook.topics.iter()
         .find(|x| headers.iter().find(|y| y.eq(x)).is_some());
 
     // read request body from cache
@@ -116,7 +116,7 @@ async fn send_request(headers: Vec<String>, body_buffer: Vec<u8>) -> Result<()> 
     let mut iter = headers.into_iter();
 
     // all the unwraps here should be fine as it was asserted in init
-    let mut rebuilt_headers = CONFIG.get().unwrap().webhook.headers.iter()
+    let mut rebuilt_headers = MANIFEST.get().unwrap().webhook.headers.iter()
         // check if header needs value from env or not
         .map(|v| match v.get(1).is_some_and(|x| x.eq(REQUEST_HEADERS)) {
             true => {
@@ -135,13 +135,13 @@ async fn send_request(headers: Vec<String>, body_buffer: Vec<u8>) -> Result<()> 
         .collect::<Vec<Vec<_>>>();
 
     // optional: check if webhook requires hash
-    let hash = &CONFIG.get().unwrap().webhook.hash;
+    let hash = &MANIFEST.get().unwrap().webhook.hash;
     if hash.is_required {
         let header = hash.header.clone();
         let mut value = iter.next().unwrap();
 
         // optional: check if request requires rehash from another secret
-        if CONFIG.get().unwrap().webhook.rehash.is_required {
+        if MANIFEST.get().unwrap().webhook.rehash.is_required {
             value = rehash(body_buffer.clone());
         }
 
@@ -163,6 +163,7 @@ async fn send_request(headers: Vec<String>, body_buffer: Vec<u8>) -> Result<()> 
     builder = builder.body(body_buffer);
 
     // send request
+    println!("Redirecting request to {}", WEBHOOK.get().unwrap());
     builder.send().await?;
 
     Ok(())
@@ -170,7 +171,7 @@ async fn send_request(headers: Vec<String>, body_buffer: Vec<u8>) -> Result<()> 
 
 fn get_required_headers_values(req: &Request<()>) -> Vec<String> {
     // get base headers value
-    let mut headers = CONFIG.get().unwrap().webhook.headers.iter()
+    let mut headers = MANIFEST.get().unwrap().webhook.headers.iter()
         .filter_map(|v| match v.get(1).is_some_and(|x| x.eq(REQUEST_HEADERS)) {
             true => Some(req.header(v.get(0).unwrap().as_str())
                 .expect(format!("missing header: {}", v.get(0).unwrap()).as_str())
@@ -182,7 +183,7 @@ fn get_required_headers_values(req: &Request<()>) -> Vec<String> {
         .collect::<Vec<_>>();
 
     // optional: add hash value to required headers
-    let hash = &CONFIG.get().unwrap().webhook.hash;
+    let hash = &MANIFEST.get().unwrap().webhook.hash;
     if hash.is_required {
         headers.push(req.header(hash.header.as_str())
             .expect(format!("missing header: {}", hash.header).as_str())
@@ -201,7 +202,7 @@ fn rehash(input_buffer: Vec<u8>) -> String {
     use base64::prelude::*;
 
     let secret = std::env::var(
-        &CONFIG.get().unwrap().webhook.rehash.secret).unwrap();
+        &MANIFEST.get().unwrap().webhook.rehash.secret).unwrap();
 
     let mut generator = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
         .expect("cannot generate hmac");
@@ -211,4 +212,20 @@ fn rehash(input_buffer: Vec<u8>) -> String {
     let hash = generator.finalize().into_bytes();
 
     BASE64_STANDARD.encode(hash)
+}
+
+#[test]
+fn test_init() {
+    let manifest = Manifest::try_from("./config/test.toml").unwrap();
+    let _ = init(manifest);
+}
+
+#[test]
+fn test_get_headers() {
+
+}
+
+#[test]
+fn test_rehash() {
+
 }

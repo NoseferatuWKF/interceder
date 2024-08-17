@@ -1,0 +1,12 @@
+[server]
+address = "0.0.0.0"
+port = "3435"
+env = []
+
+[webhook]
+url = "http://localhost:8080"
+params = []
+topics = []
+headers = []
+hash = { is_required = false, header = "" }
+rehash = { is_required = false, secret = "" }

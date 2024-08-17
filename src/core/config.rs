@@ -1,12 +1,12 @@
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub struct Config {
+pub struct Manifest {
     pub server: Server,
     pub webhook: Webhook,
 }
 
-impl TryFrom<&str> for Config {
+impl TryFrom<&str> for Manifest {
     type Error = Box<dyn std::error::Error>;
 
     fn try_from(path: &str) -> Result<Self, Self::Error> {
@@ -18,7 +18,7 @@ impl TryFrom<&str> for Config {
         let mut contents = String::new();
 
         file.read_to_string(&mut contents)?;
-        let config: Config = toml::from_str(&contents)?;
+        let config: Manifest = toml::from_str(&contents)?;
 
         Ok(config)
     }

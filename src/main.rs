@@ -2,16 +2,16 @@ mod core;
 
 fn main() {
     use core::server;
-    use core::config::Config;
+    use core::config::Manifest;
 
-    let config: Config;
-    // assert: config must exist in path or die
-    match Config::try_from("interceder.toml") {
-        Ok(v) => config = v,
+    let manifest: Manifest;
+    // assert: manifest must exist in path or die
+    match Manifest::try_from("./config/manifest.toml") {
+        Ok(v) => manifest = v,
         Err(e) => panic!("{e}"),
     }
 
-    if let Err(e) = server::run(config) {
+    if let Err(e) = server::run(manifest) {
         panic!("{e}");
     }
 }

@@ -14,6 +14,6 @@ COPY --from=build /app/target/release/interceder .
 
 RUN apk add libgcc
 
-EXPOSE 42069
+EXPOSE 3435
 
 CMD ["./interceder"]

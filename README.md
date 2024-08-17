@@ -6,4 +6,8 @@ as close as possible to production and have better isolation between processes a
 Enter Interceder, while it still sucks, it gets the job done. You can have it hosted inside a container for somewhat better isolation, or heck add a reverse proxy then connect it to a Relay server. Just make sure
 that it is always trusted locally. Interceder will then sit between both networks and delegate the webhooks to where it should actually go.
 
-# TODO: Usage
+# TODO
+- [ ] tests
+- [ ] usage
+- [ ] license
+- [ ] ghcr
