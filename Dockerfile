@@ -8,6 +8,8 @@ RUN cargo build -r
 
 FROM alpine
 
+LABEL org.opencontainers.image.source=https://github.com/NoseferatuWKF/interceder
+
 WORKDIR /app
 
 COPY --from=build /app/target/release/interceder .

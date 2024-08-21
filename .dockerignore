@@ -2,3 +2,5 @@ config
 payload
 target
 Dockerfile
+LICENSE.md
+README.md
